@@ -98,7 +98,7 @@ func (n *NetMock) hookToAtxPool(transmission []byte) {
 
 		if n.atxDb != nil {
 			if atxDb, ok := n.atxDb.(*DB); ok {
-				err := atxDb.StoreAtx(atx.PubLayerID.GetEpoch(), atx)
+				err := atxDb.StoreAtx(context.TODO(), atx.PubLayerID.GetEpoch(), atx)
 				if err != nil {
 					panic(err)
 				}
@@ -107,8 +107,7 @@ func (n *NetMock) hookToAtxPool(transmission []byte) {
 	}
 }
 
-type MockSigning struct {
-}
+type MockSigning struct{}
 
 func (ms *MockSigning) Sign(m []byte) []byte {
 	return m
@@ -302,7 +301,7 @@ func assertLastAtx(r *require.Assertions, posAtx, prevAtx *types.ActivationTxHea
 func storeAtx(r *require.Assertions, activationDb *DB, atx *types.ActivationTx, lg log.Log) {
 	epoch := atx.PubLayerID.GetEpoch()
 	lg.Info("stored ATX in epoch %v", epoch)
-	err := activationDb.StoreAtx(epoch, atx)
+	err := activationDb.StoreAtx(context.TODO(), epoch, atx)
 	r.NoError(err)
 }
 
@@ -322,6 +321,42 @@ func publishAtx(b *Builder, meshLayer types.LayerID, clockEpoch types.EpochID, b
 }
 
 // ========== Tests ==========
+
+func TestBuilder_StartSmeshingCoinbase(t *testing.T) {
+	activationDb := newActivationDb(t)
+	builder := newBuilder(t, activationDb)
+
+	coinbase := types.Address{1, 1, 1}
+	require.NoError(t, builder.StartSmeshing(coinbase, PostSetupOpts{}))
+	t.Cleanup(func() { builder.StopSmeshing(true) })
+	require.Equal(t, coinbase, builder.Coinbase())
+}
+
+func TestBuilder_RestartSmeshing(t *testing.T) {
+	activationDb := newActivationDb(t)
+	net.atxDb = activationDb
+	cfg := Config{
+		CoinbaseAccount: coinbase,
+		GoldenATXID:     goldenATXID,
+		LayersPerEpoch:  layersPerEpoch,
+	}
+	sessionChan := make(chan struct{})
+	close(sessionChan)
+	builder := NewBuilder(cfg, nodeID, &MockSigning{}, activationDb, net, meshProviderMock, layersPerEpoch, nipostBuilderMock,
+		&postSetupProviderMock{sessionChan: sessionChan},
+		layerClockMock, &mockSyncer{}, NewMockDB(), logtest.New(t).WithName("atxBuilder"))
+	builder.initialPost = initialPost
+
+	for i := 0; i < 100; i++ {
+		require.NoError(t, builder.StartSmeshing(types.Address{}, PostSetupOpts{}))
+		// NOTE(dshulyak) this is a poor way to test that smeshing started and didn't exit immediatly,
+		// but proper test requires adding quite a lot of additional mocking and general refactoring.
+		time.Sleep(400 * time.Microsecond)
+		require.True(t, builder.Smeshing())
+		require.NoError(t, builder.StopSmeshing(true))
+		require.False(t, builder.Smeshing())
+	}
+}
 
 func TestBuilder_PublishActivationTx_HappyFlow(t *testing.T) {
 	types.SetLayersPerEpoch(layersPerEpoch)
@@ -563,9 +598,13 @@ func TestBuilder_PublishActivationTx_Serialize(t *testing.T) {
 
 	bt, err := types.InterfaceToBytes(act)
 	assert.NoError(t, err)
+
 	a, err := types.BytesToAtx(bt)
 	assert.NoError(t, err)
+
 	bt2, err := types.InterfaceToBytes(a)
+	assert.NoError(t, err)
+
 	assert.Equal(t, bt, bt2)
 }
 
@@ -629,7 +668,6 @@ func TestBuilder_SignAtx(t *testing.T) {
 
 	ok := signing.Verify(signing.NewPublicKey(util.Hex2Bytes(atx.NodeID.Key)), atxBytes, atx.Sig)
 	assert.True(t, ok)
-
 }
 
 func TestBuilder_NIPostPublishRecovery(t *testing.T) {
@@ -660,7 +698,7 @@ func TestBuilder_NIPostPublishRecovery(t *testing.T) {
 
 	atx := newActivationTx(types.NodeID{Key: "aaaaaa", VRFPublicKey: []byte("bbbbb")}, 1, prevAtx, prevAtx, types.NewLayerID(15), 1, 100, coinbase, 100, npst)
 
-	err := activationDb.StoreAtx(atx.PubLayerID.GetEpoch(), atx)
+	err := activationDb.StoreAtx(context.TODO(), atx.PubLayerID.GetEpoch(), atx)
 	assert.NoError(t, err)
 
 	challenge := types.NIPostChallenge{

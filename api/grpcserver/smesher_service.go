@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"fmt"
+
 	"github.com/golang/protobuf/ptypes/empty"
 	pb "github.com/spacemeshos/api/release/go/spacemesh/v1"
 	"github.com/spacemeshos/go-spacemesh/activation"
@@ -42,7 +43,6 @@ func (s SmesherService) IsSmeshing(context.Context, *empty.Empty) (*pb.IsSmeshin
 // StartSmeshing requests that the node begin smeshing
 func (s SmesherService) StartSmeshing(ctx context.Context, in *pb.StartSmeshingRequest) (*pb.StartSmeshingResponse, error) {
 	log.Info("GRPC SmesherService.StartSmeshing")
-
 	if in.Coinbase == nil {
 		return nil, status.Errorf(codes.InvalidArgument, "`Coinbase` must be provided")
 	}
@@ -63,7 +63,6 @@ func (s SmesherService) StartSmeshing(ctx context.Context, in *pb.StartSmeshingR
 		return nil, status.Error(codes.InvalidArgument, "`Opts.NumFiles` must be provided")
 	}
 
-	coinbaseAddr := types.BytesToAddress(in.Coinbase.Address)
 	opts := activation.PostSetupOpts{
 		DataDir:           in.Opts.DataDir,
 		NumUnits:          uint(in.Opts.NumUnits),
@@ -72,7 +71,8 @@ func (s SmesherService) StartSmeshing(ctx context.Context, in *pb.StartSmeshingR
 		Throttle:          in.Opts.Throttle,
 	}
 
-	if err := s.smeshingProvider.StartSmeshing(ctx, coinbaseAddr, opts); err != nil {
+	coinbaseAddr := types.BytesToAddress(in.Coinbase.Address)
+	if err := s.smeshingProvider.StartSmeshing(coinbaseAddr, opts); err != nil {
 		err := fmt.Sprintf("failed to start smeshing: %v", err)
 		log.Error(err)
 		return nil, status.Error(codes.Internal, err)
@@ -87,12 +87,20 @@ func (s SmesherService) StartSmeshing(ctx context.Context, in *pb.StartSmeshingR
 func (s SmesherService) StopSmeshing(ctx context.Context, in *pb.StopSmeshingRequest) (*pb.StopSmeshingResponse, error) {
 	log.Info("GRPC SmesherService.StopSmeshing")
 
-	if err := s.smeshingProvider.StopSmeshing(in.DeleteFiles); err != nil {
-		err := fmt.Sprintf("failed to stop smeshing: %v", err)
-		log.Error(err)
-		return nil, status.Error(codes.Internal, err)
+	errchan := make(chan error, 1)
+	go func() {
+		errchan <- s.smeshingProvider.StopSmeshing(in.DeleteFiles)
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case err := <-errchan:
+		if err != nil {
+			err := fmt.Sprintf("failed to stop smeshing: %v", err)
+			log.Error(err)
+			return nil, status.Error(codes.Internal, err)
+		}
 	}
-
 	return &pb.StopSmeshingResponse{
 		Status: &rpcstatus.Status{Code: int32(code.Code_OK)},
 	}, nil

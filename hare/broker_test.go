@@ -1,13 +1,11 @@
 package hare
 
 import (
-	"bytes"
 	"context"
 	"sync"
 	"testing"
 	"time"
 
-	xdr "github.com/nullstyle/go-xdr/xdr3"
 	"github.com/spacemeshos/go-spacemesh/common/types"
 	"github.com/spacemeshos/go-spacemesh/log/logtest"
 	"github.com/spacemeshos/go-spacemesh/p2p/p2pcrypto"
@@ -17,14 +15,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var instanceID0 = types.NewLayerID(0)
-var instanceID1 = types.NewLayerID(1)
-var instanceID2 = types.NewLayerID(2)
-var instanceID3 = types.NewLayerID(3)
-var instanceID4 = types.NewLayerID(4)
-var instanceID5 = types.NewLayerID(5)
-var instanceID6 = types.NewLayerID(6)
-var instanceID7 = types.NewLayerID(7)
+var (
+	instanceID0 = types.NewLayerID(0)
+	instanceID1 = types.NewLayerID(1)
+	instanceID2 = types.NewLayerID(2)
+	instanceID3 = types.NewLayerID(3)
+	instanceID4 = types.NewLayerID(4)
+	instanceID5 = types.NewLayerID(5)
+	instanceID6 = types.NewLayerID(6)
+	instanceID7 = types.NewLayerID(7)
+)
 
 const reqID = "abracadabra"
 
@@ -53,17 +53,18 @@ func (msq MockStateQuerier) IsIdentityActiveOnConsensusView(ctx context.Context,
 	return msq.res, msq.err
 }
 
-func createMessage(t *testing.T, instanceID types.LayerID) []byte {
+func createMessage(tb testing.TB, instanceID types.LayerID) []byte {
+	tb.Helper()
+
 	sr := signing.NewEdSigner()
 	b := newMessageBuilder()
 	msg := b.SetPubKey(sr.PublicKey()).SetInstanceID(instanceID).Sign(sr).Build()
 
-	var w bytes.Buffer
-	if _, err := xdr.Marshal(&w, msg.Message); err != nil {
-		assert.Fail(t, "Failed to marshal data")
+	buf, err := types.InterfaceToBytes(msg.Message)
+	if err != nil {
+		require.NoError(tb, err)
 	}
-
-	return w.Bytes()
+	return buf
 }
 
 func TestBroker_Start(t *testing.T) {
@@ -128,12 +129,11 @@ func TestBroker_Priority(t *testing.T) {
 		b := newMessageBuilder()
 		msg := b.SetPubKey(sr.PublicKey()).SetInstanceID(instanceID1).SetRoleProof(roleProof).Sign(sr).Build()
 
-		var w bytes.Buffer
-		if _, err := xdr.Marshal(&w, msg.Message); err != nil {
-			assert.Fail(t, "failed to marshal data")
+		buf, err := types.InterfaceToBytes(msg.Message)
+		if err != nil {
+			require.NoError(t, err)
 		}
-
-		return w.Bytes()
+		return buf
 	}
 	roleProofInbound := []byte{1, 2, 3}
 	roleProofOutbound := []byte{3, 2, 1}
@@ -229,7 +229,7 @@ func TestBroker_MaxConcurrentProcesses(t *testing.T) {
 	broker.Register(context.TODO(), instanceID4)
 	assert.Equal(t, 4, len(broker.outbox))
 
-	//this statement should cause inbox1 to be unregistered
+	// this statement should cause inbox1 to be unregistered
 	inbox5, _ := broker.Register(context.TODO(), instanceID5)
 	assert.Equal(t, 4, len(broker.outbox))
 
@@ -338,12 +338,11 @@ type mockGossipMessage struct {
 }
 
 func (mgm *mockGossipMessage) Bytes() []byte {
-	var w bytes.Buffer
-	if _, err := xdr.Marshal(&w, mgm.msg.Message); err != nil {
+	buf, err := types.InterfaceToBytes(mgm.msg.Message)
+	if err != nil {
 		return nil
 	}
-
-	return w.Bytes()
+	return buf
 }
 
 func (mgm *mockGossipMessage) ValidationCompletedChan() chan service.MessageValidation {
@@ -449,7 +448,7 @@ func TestBroker_Register3(t *testing.T) {
 	m.InnerMsg.InstanceID = instanceID1
 	msg := newMockGossipMsg(m)
 	broker.inbox <- msg
-	time.Sleep(1)
+	time.Sleep(1 * time.Millisecond)
 	client := mockClient{instanceID1}
 	ch, _ := broker.Register(context.TODO(), client.id)
 	timer := time.NewTimer(2 * time.Second)
