@@ -58,18 +58,18 @@ jobs:
       - name: Get gpu-post release
         shell: bash
         run: |
-          mkdir $TARGET
-          unzip libgpu-setup-*.zip -d $TARGET
+          mkdir ${{ env.TARGET }}
+          unzip libgpu-setup-*.zip -d ${{ env.TARGET }}
 
           #Download latest smrepl release
           wget https://github.com/spacemeshos/smrepl/releases/download/v0.1.32/${{ runner.os }}.zip
-          unzip ${{ runner.os }}.zip -d $TARGET
+          unzip ${{ runner.os }}.zip -d ${{ env.TARGET }}
           
-          rm -f $TARGET/api.h
+          rm -f ${{ env.TARGET }}/api.h
           rm -f ${{ runner.os }}.zip
 
-          mv ./build/* $TARGET
-          zip -r $TARGET.zip $TARGET
+          mv ./build/* ${{ env.TARGET }}
+          zip -r ${{ env.TARGET }}.zip ${{ env.TARGET }}
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@master
         with:
